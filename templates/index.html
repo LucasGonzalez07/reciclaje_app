@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Clasificador de Residuos</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      text-align: center;
+      margin: 0;
+      padding: 20px;
+      background: #f9f9f9;
+    }
+    h1 {
+      color: #2e7d32;
+    }
+    .container {
+      max-width: 600px;
+      margin: 0 auto;
+    }
+    .buttons {
+      margin: 15px 0;
+    }
+    button {
+      padding: 10px 12px;
+      margin: 5px;
+      font-size: 15px;
+      cursor: pointer;
+    }
+    #videoContainer, #result {
+      margin: 20px auto;
+      max-width: 500px;
+    }
+    video, img {
+      width: 100%;
+      max-width: 500px;
+      border: 2px solid #ccc;
+      border-radius: 8px;
+      display: none;
+    }
+    #result {
+      font-size: 1.3em;
+      font-weight: bold;
+    }
+    .recyclable { color: #1b5e20; }
+    .organic { color: #bf360c; }
+    #fileInput { display: none; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>♻️ Clasificador de Residuos</h1>
+    <p>Sube una foto o tómala con tu cámara.</p>
+
+    <div class="buttons">
+      <button onclick="useFile()">📁 Subir imagen</button>
+      <button onclick="useCamera()">📸 Usar cámara</button>
+    </div>
+
+    <input type="file" id="fileInput" accept="image/*" onchange="handleFileSelect(event)">
+
+    <div id="videoContainer">
+      <video id="video" autoplay playsinline></video>
+      <canvas id="canvas" style="display:none;"></canvas>
+      <img id="capturedImage" alt="Foto capturada">
+      <br>
+      <div class="buttons">
+        <button id="captureBtn" onclick="captureImage()" style="display:none;">📷 Tomar foto</button>
+        <button id="switchCameraBtn" onclick="switchCamera()" style="display:none;">🔄 Cambiar cámara</button>
+      </div>
+    </div>
+
+    <div id="result"></div>
+  </div>
+
+  <script>
+    let stream = null;
+    let useBackCamera = true;
+
+    // ➕ NUEVA FUNCIÓN: limpiar interfaz
+    function clearInterface() {
+      document.getElementById('result').innerHTML = '';
+      document.getElementById('capturedImage').style.display = 'none';
+      document.getElementById('fileInput').value = ''; // reset input file
+    }
+
+    function useFile() {
+      stopCamera();
+      clearInterface(); // ✅ Limpia antes de subir
+      document.getElementById('fileInput').click();
+    }
+
+    function stopCamera() {
+      if (stream) {
+        stream.getTracks().forEach(track => track.stop());
+        stream = null;
+      }
+      document.getElementById('video').style.display = 'none';
+      document.getElementById('captureBtn').style.display = 'none';
+      document.getElementById('switchCameraBtn').style.display = 'none';
+    }
+
+    async function useCamera() {
+      stopCamera();
+      clearInterface(); // ✅ Limpia antes de usar cámara
+      await startCamera();
+    }
+
+    async function startCamera() {
+      const video = document.getElementById('video');
+      const constraints = {
+        video: {
+          facingMode: useBackCamera ? { exact: "environment" } : "user"
+        },
+        audio: false
+      };
+
+      try {
+        stream = await navigator.mediaDevices.getUserMedia(constraints);
+        video.srcObject = stream;
+        video.style.display = 'block';
+        document.getElementById('captureBtn').style.display = 'inline-block';
+        document.getElementById('switchCameraBtn').style.display = 'inline-block';
+      } catch (err) {
+        alert("No se pudo acceder a la cámara: " + (err.message || err));
+        console.error(err);
+      }
+    }
+
+    function switchCamera() {
+      useBackCamera = !useBackCamera;
+      startCamera();
+    }
+
+    function captureImage() {
+      const video = document.getElementById('video');
+      const canvas = document.getElementById('canvas');
+      const capturedImage = document.getElementById('capturedImage');
+      const ctx = canvas.getContext('2d');
+
+      canvas.width = video.videoWidth || 640;
+      canvas.height = video.videoHeight || 480;
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+      capturedImage.src = canvas.toDataURL('image/jpeg');
+      capturedImage.style.display = 'block';
+
+      stopCamera();
+
+      sendImageToServer(capturedImage.src);
+    }
+
+    function handleFileSelect(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        clearInterface(); // ✅ Limpia antes de mostrar nueva imagen
+        const img = document.getElementById('capturedImage');
+        img.src = e.target.result;
+        img.style.display = 'block';
+        sendImageToServer(e.target.result);
+      };
+      reader.readAsDataURL(file);
+    }
+
+    function sendImageToServer(dataUrl) {
+      const byteString = atob(dataUrl.split(',')[1]);
+      const mimeString = dataUrl.split(',')[0].split(':')[1].split(';')[0];
+      const ab = new ArrayBuffer(byteString.length);
+      const ia = new Uint8Array(ab);
+      for (let i = 0; i < byteString.length; i++) {
+        ia[i] = byteString.charCodeAt(i);
+      }
+      const blob = new Blob([ab], { type: mimeString });
+
+      const formData = new FormData();
+      formData.append('file', blob, 'captured.jpg');
+
+      fetch('/predict', {
+        method: 'POST',
+        body: formData
+      })
+      .then(response => response.json())
+      .then(data => {
+        const resultDiv = document.getElementById('result');
+        if (data.error) {
+          resultDiv.innerHTML = `<p style="color:red;">❌ ${data.error}</p>`;
+        } else {
+          const className = data.class.toLowerCase();
+          resultDiv.innerHTML = `
+            <p class="${className}">${data.class}</p>
+            <p>Confianza: ${data.confidence}%</p>
+          `;
+        }
+      })
+      .catch(err => {
+        document.getElementById('result').innerHTML = `<p style="color:red;">Error: ${err.message}</p>`;
+      });
+    }
+  </script>
+</body>
+</html>

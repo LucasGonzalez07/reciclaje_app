@@ -1,0 +1,21 @@
+# Carpetas y archivos generados por Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+.venv/
+venv/
+ENV/
+
+# Archivos temporales
+*.tmp
+*.log
+.DS_Store
+
+# Carpetas de tu app
+uploads/
+
+# Archivos sensibles
+.env
